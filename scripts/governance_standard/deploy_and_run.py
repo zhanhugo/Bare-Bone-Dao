@@ -16,7 +16,7 @@ from web3 import Web3, constants
 QUORUM_PERCENTAGE = 4
 # VOTING_PERIOD = 45818  # 1 week - more traditional.
 # You might have different periods for different kinds of proposals
-VOTING_PERIOD = 5  # 5 blocks
+VOTING_PERIOD = 30  # 5 blocks
 VOTING_DELAY = 1  # 1 block
 
 # Timelock
@@ -24,8 +24,8 @@ VOTING_DELAY = 1  # 1 block
 MIN_DELAY = 1  # 1 seconds
 
 # Proposal
-PROPOSAL_DESCRIPTION = "Proposal #1: Store 1 in the Box!"
-NEW_STORE_VALUE = 5
+PROPOSAL_DESCRIPTION = "Store ['hello world!']] in the Box!"
+NEW_STORE_VALUE = ["hello world!"]
 
 
 def deploy_governor():
@@ -101,7 +101,6 @@ def propose(store_value):
     encoded_function = Contract.from_abi("Box", Box[-1], Box.abi).store.encode_input(
         *args
     )
-    print(encoded_function)
     propose_tx = GovernorContract[-1].propose(
         [Box[-1].address],
         [0],
@@ -112,16 +111,18 @@ def propose(store_value):
     if network.show_active() in LOCAL_BLOCKCHAIN_ENVIRONMENTS:
         tx = account.transfer(accounts[0], "0 ether")
         tx.wait(1)
-    propose_tx.wait(2)  # We wait 2 blocks to include the voting delay
+    propose_tx.wait(5)  # We wait 2 blocks to include the voting delay
     # This will return the proposal ID
-    print(f"Proposal state {GovernorContract[-1].state(propose_tx.return_value)}")
+    proposal_id = propose_tx.events['ProposalCreated']['proposalId']
+
+    print(f"Proposal state {GovernorContract[-1].state(proposal_id)}")
     print(
-        f"Proposal snapshot {GovernorContract[-1].proposalSnapshot(propose_tx.return_value)}"
+        f"Proposal snapshot {GovernorContract[-1].proposalSnapshot(proposal_id)}"
     )
     print(
-        f"Proposal deadline {GovernorContract[-1].proposalDeadline(propose_tx.return_value)}"
+        f"Proposal deadline {GovernorContract[-1].proposalDeadline(proposal_id)}"
     )
-    return propose_tx.return_value
+    return proposal_id
 
 
 # Can be done through a UI
@@ -133,8 +134,9 @@ def vote(proposal_id: int, vote: int):
     tx = GovernorContract[-1].castVoteWithReason(
         proposal_id, vote, "Cuz I lika do da cha cha", {"from": account}
     )
-    tx.wait(1)
+    tx.wait(2)
     print(tx.events["VoteCast"])
+    tx.wait(30)
 
 
 def queue_and_execute(store_value):
@@ -157,7 +159,7 @@ def queue_and_execute(store_value):
         description_hash,
         {"from": account},
     )
-    tx.wait(1)
+    tx.wait(2)
     tx = GovernorContract[-1].execute(
         [Box[-1].address],
         [0],
@@ -165,7 +167,7 @@ def queue_and_execute(store_value):
         description_hash,
         {"from": account},
     )
-    tx.wait(1)
+    tx.wait(2)
     print(Box[-1].retrieve())
 
 

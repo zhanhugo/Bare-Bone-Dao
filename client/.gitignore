@@ -1,15 +1,4 @@
-__pycache__
-.history
-.hypothesis/
-artifacts/
-reports/
-.env
-.article.md
-node_modules
-.vscode
-*.DS_Store
-yarn.lock
-package-lock.json
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
 /node_modules
