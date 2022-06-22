@@ -5,6 +5,7 @@ import {getEthereum} from "./getEthereum"
 import {getProposalState} from "./getProposalState"
 import map from "./artifacts/deployments/map.json"
 import { ethers } from 'ethers'
+// import { time } from "@openzeppelin/test-helpers";
 
 class App extends Component {
 
@@ -15,6 +16,7 @@ class App extends Component {
         box: null,
         boxValue: [],
         boxInput: "",
+        investInput: 0,
         descriptionInput: "",
         governor: null,
         proposals: []
@@ -49,8 +51,7 @@ class App extends Component {
     componentDidUpdate = async (prevProps, prevState) => {
         const { box, governor, proposals } = this.state
         proposals.forEach(async (proposal) => {
-            const args = [["caonima"]]
-            console.log("yeet")
+            const args = [["test"]]
             const functionToCall = "store"
             const encodedFunctionCall = box.interface.encodeFunctionData(functionToCall, args)
             const descriptionHash = ethers.utils.id(proposal.description)
@@ -122,10 +123,34 @@ class App extends Component {
             return
         }
 
+        const governanceToken = await this.loadContract(_chainID,"GovernanceToken")
+
+        if (!governanceToken) {
+            return
+        }
+
+        const blockNumber = await this.state.provider.getBlockNumber()
+        var inDao
+
+        var blockOffset = 0
+
+        while (true) {
+            console.log(blockNumber - blockOffset)
+            try {
+                const accountVotes = await governor.getVotes(this.state.accounts[0], blockNumber - blockOffset)
+                inDao = accountVotes > 0
+                break
+            } catch (error) {}
+            blockOffset += 1
+        }
+        
+
         this.setState({
             box,
             governor,
+            governanceToken,
             boxValue,
+            inDao
         })
 
         this.loadProposals()
@@ -177,7 +202,7 @@ class App extends Component {
     }
 
     propose = async (e) => {
-        const { accounts, governor, box, boxInput, descriptionInput } = this.state
+        const { governor, box, boxInput, descriptionInput } = this.state
         e.preventDefault()
         const encodedFunctionCall = box.interface.encodeFunctionData("store", [[boxInput]])
         try {
@@ -198,8 +223,27 @@ class App extends Component {
     vote = async (id) => {
         const { governor } = this.state
         try {
-            const voteTx = await governor.castVoteWithReason(id, 1, "just testing la")
+            // 0: against, 1: for, 2: abstain
+            const voteTx = await governor.castVoteWithReason(id, 0, "just testing la")
             await voteTx.wait(1)
+            this.loadProposals()
+        } catch (e) {
+            console.log(e)
+        }
+    }
+
+    invest = async (e) => {
+        const { governanceToken, accounts, investInput } = this.state
+        e.preventDefault()
+        try {
+            // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", investInput)
+            // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", investInput)
+            const investTx = await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
+            const delegate = await governanceToken.delegates(this.state.accounts[0])
+            if (delegate == 0) {            
+                await governanceToken.delegate(this.state.accounts[0])
+            }
+            await investTx.wait(1)
             this.loadProposals()
         } catch (e) {
             console.log(e)
@@ -210,7 +254,7 @@ class App extends Component {
         const {
             provider, accounts, chainId,
             box, boxValue, boxInput, descriptionInput,
-            proposals
+            proposals, inDao,investInput
         } = this.state
 
         if (!provider) {
@@ -238,6 +282,20 @@ class App extends Component {
                         </p>
                         : null
                 }
+                <form onSubmit={(e) => this.invest(e)}>
+                    <div>
+                        <label>Choose amount to invest: </label>
+                        <br/>
+                        <input
+                            name="investInput"
+                            type="number"
+                            value={investInput}
+                            onChange={(e) => this.setState({investInput: e.target.value})}
+                        />
+                        <br/>
+                        <button type="submit" disabled={!isAccountsUnlocked}>Invest</button>
+                    </div>
+                </form>
                 <h2>Box Contract</h2>
 
                 <div>The stored value is</div> 
@@ -247,46 +305,52 @@ class App extends Component {
                     )
                 }</div>
 
-                <h2>Proposals</h2>
-                <form onSubmit={(e) => this.propose(e)}>
-                    <div>
-                        <label>Propose a new value: </label>
-                        <br/>
-                        <input
-                            name="boxInput"
-                            type="text"
-                            value={boxInput}
-                            onChange={(e) => this.setState({boxInput: e.target.value})}
-                        />
-                        <br/>
-                        <label>Write a short description: </label>
-                        <br/>
-                        <input
-                            name="boxInput"
-                            type="text"
-                            value={descriptionInput}
-                            onChange={(e) => this.setState({descriptionInput: e.target.value})}
-                        />
-                        <br/>
-                        <button type="submit" disabled={!isAccountsUnlocked}>Submit</button>
-                    </div>
-                </form>
-                <div>{
-                    proposals.reverse().map(proposal => (
-                        <div key={proposal.id}>
-                            <p>{"Proposal ID: " + proposal.id}</p>
-                            <p>{proposal.description}</p>
-                            <p>{"for: " + proposal.forVotes}</p>
-                            <p>{"against: " + proposal.againstVotes}</p>
-                            <p>{"state: " + proposal.state}</p>
-                            <button 
-                                onClick={() => this.vote(proposal.id)}
-                                disabled={proposal.state != "Active"}
-                            > Vote </button>
+                {inDao ?
+                <div>
+                    <h2>Proposals</h2>
+                    <form onSubmit={(e) => this.propose(e)}>
+                        <div>
+                            <label>Propose a new value: </label>
+                            <br/>
+                            <input
+                                name="boxInput"
+                                type="text"
+                                value={boxInput}
+                                onChange={(e) => this.setState({boxInput: e.target.value})}
+                            />
+                            <br/>
+                            <label>Write a short description: </label>
+                            <br/>
+                            <input
+                                name="boxInput"
+                                type="text"
+                                value={descriptionInput}
+                                onChange={(e) => this.setState({descriptionInput: e.target.value})}
+                            />
+                            <br/>
+                            <button type="submit" disabled={!isAccountsUnlocked}>Submit</button>
                         </div>
-                    ))
-                }</div>
-                <br/>
+                    </form>
+                    <div>{
+                        proposals.reverse().map(proposal => (
+                            <div key={proposal.id}>
+                                <p>{"Proposal ID: " + proposal.id}</p>
+                                <p>{proposal.description}</p>
+                                <p>{"for: " + proposal.forVotes}</p>
+                                <p>{"against: " + proposal.againstVotes}</p>
+                                <p>{"state: " + proposal.state}</p>
+                                <button  
+                                    onClick={() => this.vote(proposal.id)}
+                                    disabled={proposal.state !== "Active"}
+                                > Vote </button>
+                            </div>
+                        ))
+                    }</div>
+                    <br/>
+                </div>
+                :
+                null
+                }
             </div>
         )
     }
