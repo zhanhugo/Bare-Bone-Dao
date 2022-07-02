@@ -96,7 +96,7 @@ class App extends Component {
     }
 
     loadInitialContracts = async () => {
-        // <=42 to exclude Kovan, <42 to include kovan
+        // <=42 to exclude Kovan, <42 to include kovan, 4 for rinkeby
         if (this.state.chainId < 4) {
             // Wrong Network!
             return
@@ -236,11 +236,13 @@ class App extends Component {
         const { governanceToken, accounts, investInput } = this.state
         e.preventDefault()
         try {
+            // TODO: mint max_supply of GT to a contract that has exchange method
+            // Right now need manual approval of token transfer and no eth is needed other than gas
             // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", investInput)
             // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", investInput)
             const investTx = await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
             const delegate = await governanceToken.delegates(this.state.accounts[0])
-            if (delegate == 0) {            
+            if (delegate === 0) {            
                 await governanceToken.delegate(this.state.accounts[0])
             }
             await investTx.wait(1)
@@ -257,17 +259,13 @@ class App extends Component {
             proposals, inDao,investInput
         } = this.state
 
-        if (!provider) {
+        if (!provider || !box) {
             return <div>Loading Web3, accounts, and contracts...</div>
         }
 
         // <=42 to exclude Kovan, <42 to include Kovan
         if (isNaN(chainId) || chainId < 4) {
             return <div>Wrong Network! Switch to your local RPC "Localhost: 8545" in your Web3 provider (e.g. Metamask)</div>
-        }
-
-        if (!box) {
-            return <div>Could not find a deployed contract. Check console for details.</div>
         }
 
         const isAccountsUnlocked = accounts ? accounts.length > 0 : false
@@ -277,8 +275,8 @@ class App extends Component {
                 <h1>Bare Bone Dao</h1>
                 {
                     !isAccountsUnlocked ?
-                        <p><strong>Connect with Metamask and refresh the page to
-                            be able to edit the storage fields.</strong>
+                        <p>
+                            <strong>Connect with Metamask and refresh the page.</strong>
                         </p>
                         : null
                 }
