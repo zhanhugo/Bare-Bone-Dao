@@ -104,7 +104,7 @@ class App extends Component {
     };
 
     loadInitialContracts = async () => {
-        // <=42 to exclude Kovan, <42 to include kovan
+        // <=42 to exclude Kovan, <42 to include kovan, 4 for rinkeby
         if (this.state.chainId < 4) {
             // Wrong Network!
             return
