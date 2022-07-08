@@ -5,7 +5,6 @@ import {getEthereum} from "./getEthereum"
 import {getProposalState} from "./getProposalState"
 import map from "./artifacts/deployments/map.json"
 import { ethers } from 'ethers'
-// import { time } from "@openzeppelin/test-helpers";
 
 class App extends Component {
 
@@ -19,7 +18,8 @@ class App extends Component {
         investInput: 0,
         descriptionInput: "",
         governor: null,
-        proposals: []
+        proposals: [],
+        waiting: false
     }
 
     componentDidMount = async () => {
@@ -49,42 +49,38 @@ class App extends Component {
     }
 
     componentDidUpdate = async (prevProps, prevState) => {
-        const { box, governor, proposals } = this.state
+        const { box, governor, proposals, waiting } = this.state
+        if (!waiting) {
+            await this.waitFor(1).then(this.loadProposals)
+        }
         proposals.forEach(async (proposal) => {
-            const args = [["test"]]
-            const functionToCall = "store"
-            const encodedFunctionCall = box.interface.encodeFunctionData(functionToCall, args)
             const descriptionHash = ethers.utils.id(proposal.description)
             const checkId = await governor.hashProposal(
                 [box.address],
                 [0],
-                [encodedFunctionCall],
+                proposal.calldata,
                 descriptionHash
             )
             if (checkId.hex === proposal.id.hex) {
                 if (proposal.state === "Succeeded") {
                     try {
-                        const queueTx = await governor.queue(
+                        await governor.queue(
                             [box.address], 
                             [0], 
-                            [encodedFunctionCall], 
+                            proposal.calldata,
                             descriptionHash
                         )
-                        await queueTx.wait(2)
-                        this.loadProposals()
                     } catch (e) {
                         console.log(e)
                     }
                 } else if (proposal.state === "Queued") {
                     try {
-                        const executeTx = await governor.execute(
+                        await governor.execute(
                             [box.address],
                             [0],
-                            [encodedFunctionCall],
+                            proposal.calldata,
                             descriptionHash
                         )
-                        await executeTx.wait(2)
-                        this.loadProposals()
                     } catch (e) {
                         console.log(e)
                     }
@@ -94,6 +90,18 @@ class App extends Component {
             }
         });
     }
+
+    waitFor = async (blocks) => {
+        this.setState({ waiting: true })
+        const currBlockNumber = await this.state.provider.getBlockNumber()
+        return new Promise((resolve, reject) => {
+            this.state.provider.on("block", (blockNumber) => {
+                if (blockNumber === currBlockNumber + blocks) {
+                    resolve();
+                }
+            })
+        })
+    };
 
     loadInitialContracts = async () => {
         // <=42 to exclude Kovan, <42 to include kovan
@@ -129,28 +137,11 @@ class App extends Component {
             return
         }
 
-        const blockNumber = await this.state.provider.getBlockNumber()
-        var inDao
-
-        var blockOffset = 0
-
-        while (true) {
-            console.log(blockNumber - blockOffset)
-            try {
-                const accountVotes = await governor.getVotes(this.state.accounts[0], blockNumber - blockOffset)
-                inDao = accountVotes > 0
-                break
-            } catch (error) {}
-            blockOffset += 1
-        }
-        
-
         this.setState({
             box,
             governor,
             governanceToken,
-            boxValue,
-            inDao
+            boxValue
         })
 
         this.loadProposals()
@@ -166,6 +157,7 @@ class App extends Component {
             const { againstVotes, forVotes, abstainVotes } = await governor.proposalVotes(event.args[0])
             return {
                 id: event.args[0],
+                calldata: event.args[5],
                 description: event.args[8],
                 againstVotes, 
                 forVotes, 
@@ -173,7 +165,18 @@ class App extends Component {
                 state: getProposalState(await governor.state(event.args[0])),
             }
         }))
-        this.setState({proposals, boxValue})
+        const blockNumber = await this.state.provider.getBlockNumber()
+        var inDao
+        var blockOffset = 0
+        while (true) {
+            try {
+                const accountVotes = await governor.getVotes(this.state.accounts[0], blockNumber - blockOffset)
+                inDao = accountVotes > 0
+                break
+            } catch (error) {}
+            blockOffset += 1
+        }
+        this.setState({proposals, boxValue, inDao, waiting: false })
     }
 
     loadContract = async (chain, contractName) => {
@@ -206,15 +209,12 @@ class App extends Component {
         e.preventDefault()
         const encodedFunctionCall = box.interface.encodeFunctionData("store", [[boxInput]])
         try {
-            const proposeTx = await governor.propose(
+            await governor.propose(
                 [box.address],
                 [0],
                 [encodedFunctionCall],
                 descriptionInput
             )
-
-            await proposeTx.wait(1)
-            this.loadProposals()
         } catch (e) {
             console.log(e)
         }
@@ -224,9 +224,7 @@ class App extends Component {
         const { governor } = this.state
         try {
             // 0: against, 1: for, 2: abstain
-            const voteTx = await governor.castVoteWithReason(id, 0, "just testing la")
-            await voteTx.wait(1)
-            this.loadProposals()
+            await governor.castVoteWithReason(id, 1, "just testing la")
         } catch (e) {
             console.log(e)
         }
@@ -240,13 +238,11 @@ class App extends Component {
             // Right now need manual approval of token transfer and no eth is needed other than gas
             // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", investInput)
             // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", investInput)
-            const investTx = await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
+            await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
             const delegate = await governanceToken.delegates(this.state.accounts[0])
             if (delegate === 0) {            
                 await governanceToken.delegate(this.state.accounts[0])
             }
-            await investTx.wait(1)
-            this.loadProposals()
         } catch (e) {
             console.log(e)
         }
@@ -313,6 +309,7 @@ class App extends Component {
                             <input
                                 name="boxInput"
                                 type="text"
+                                autoComplete="off"
                                 value={boxInput}
                                 onChange={(e) => this.setState({boxInput: e.target.value})}
                             />
@@ -322,6 +319,7 @@ class App extends Component {
                             <input
                                 name="boxInput"
                                 type="text"
+                                autoComplete="off"
                                 value={descriptionInput}
                                 onChange={(e) => this.setState({descriptionInput: e.target.value})}
                             />
