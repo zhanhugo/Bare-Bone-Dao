@@ -32,6 +32,11 @@ class App extends Component {
         try {
             const ethereum = await getEthereum()
             accounts = await ethereum.request({ method: 'eth_requestAccounts' })
+            const _this = this
+            ethereum.on('accountsChanged', function (accounts) {
+                _this.setState({accounts})
+                _this.loadProposals()
+            })
         } catch (e) {
             console.log(`Could not enable accounts. Interaction with contracts not available.
             Use a modern browser with a Web3 plugin to fix this issue.`)
@@ -49,53 +54,19 @@ class App extends Component {
     }
 
     componentDidUpdate = async (prevProps, prevState) => {
-        const { box, governor, proposals, waiting } = this.state
+        const { waiting } = this.state
         if (!waiting) {
+            console.log("will reload")
             await this.waitFor(1).then(this.loadProposals)
         }
-        proposals.forEach(async (proposal) => {
-            const descriptionHash = ethers.utils.id(proposal.description)
-            const checkId = await governor.hashProposal(
-                [box.address],
-                [0],
-                proposal.calldata,
-                descriptionHash
-            )
-            if (checkId.hex === proposal.id.hex) {
-                if (proposal.state === "Succeeded") {
-                    try {
-                        await governor.queue(
-                            [box.address], 
-                            [0], 
-                            proposal.calldata,
-                            descriptionHash
-                        )
-                    } catch (e) {
-                        console.log(e)
-                    }
-                } else if (proposal.state === "Queued") {
-                    try {
-                        await governor.execute(
-                            [box.address],
-                            [0],
-                            proposal.calldata,
-                            descriptionHash
-                        )
-                    } catch (e) {
-                        console.log(e)
-                    }
-                }
-            } else {
-                console.log("Proposal changed...")
-            }
-        });
     }
 
     waitFor = async (blocks) => {
+        const { provider } = this.state
         this.setState({ waiting: true })
-        const currBlockNumber = await this.state.provider.getBlockNumber()
+        const currBlockNumber = await provider.getBlockNumber()
         return new Promise((resolve, reject) => {
-            this.state.provider.on("block", (blockNumber) => {
+            provider.on("block", (blockNumber) => {
                 if (blockNumber === currBlockNumber + blocks) {
                     resolve();
                 }
@@ -104,17 +75,18 @@ class App extends Component {
     };
 
     loadInitialContracts = async () => {
+        const { chainId } = this.state
         // <=42 to exclude Kovan, <42 to include kovan, 4 for rinkeby
-        if (this.state.chainId < 4) {
+        if (chainId < 4) {
             // Wrong Network!
             return
         }
         
         var _chainID = 0;
-        if (this.state.chainId === 4){
+        if (chainId === 4){
             _chainID = 4;
         }
-        if (this.state.chainId === 1337){
+        if (chainId === 1337){
             _chainID = "dev"
         }
         const box = await this.loadContract(_chainID,"Box")
@@ -148,11 +120,22 @@ class App extends Component {
     }
 
     loadProposals = async () => {
-        const { governor, box } = this.state
+        const { governor, box, accounts, provider } = this.state
         const boxValue = await box.retrieve()
         const proposalCreated = await governor.filters.ProposalCreated();
         const logs = await governor.queryFilter(proposalCreated, 0, "latest");
         const events = logs.map((log) => governor.interface.parseLog(log));
+        const blockNumber = await provider.getBlockNumber()
+        var inDao
+        var blockOffset = 0
+        while (true) {
+            try {
+                const accountVotes = await governor.getVotes(accounts[0], blockNumber - blockOffset)
+                inDao = accountVotes > 0
+                break
+            } catch (error) {}
+            blockOffset += 1
+        }
         const proposals = await Promise.all(events.map(async (event) => {
             const { againstVotes, forVotes, abstainVotes } = await governor.proposalVotes(event.args[0])
             return {
@@ -162,20 +145,11 @@ class App extends Component {
                 againstVotes, 
                 forVotes, 
                 abstainVotes,
+                deadline: (await governor.proposalDeadline(event.args[0])).toNumber() - blockNumber,
                 state: getProposalState(await governor.state(event.args[0])),
+                eta: await governor.proposalEta(event.args[0])
             }
         }))
-        const blockNumber = await this.state.provider.getBlockNumber()
-        var inDao
-        var blockOffset = 0
-        while (true) {
-            try {
-                const accountVotes = await governor.getVotes(this.state.accounts[0], blockNumber - blockOffset)
-                inDao = accountVotes > 0
-                break
-            } catch (error) {}
-            blockOffset += 1
-        }
         this.setState({proposals, boxValue, inDao, waiting: false })
     }
 
@@ -230,21 +204,75 @@ class App extends Component {
         }
     }
 
+    queue = async (proposal) => {
+        const { governor, box  } = this.state
+        const descriptionHash = ethers.utils.id(proposal.description)
+        try {
+            await governor.queue(
+                [box.address], 
+                [0], 
+                proposal.calldata,
+                descriptionHash
+            )
+        } catch (e) {
+            console.log(e)
+        }
+    }
+
+    execute = async (proposal) => {
+        const { governor, box  } = this.state
+        const descriptionHash = ethers.utils.id(proposal.description)
+        try {
+            await governor.execute(
+                [box.address], 
+                [0], 
+                proposal.calldata,
+                descriptionHash
+            )
+        } catch (e) {
+            console.log(e)
+        }
+    }
+
     invest = async (e) => {
         const { governanceToken, accounts, investInput } = this.state
         e.preventDefault()
         try {
             // TODO: mint max_supply of GT to a contract that has exchange method
             // Right now need manual approval of token transfer and no eth is needed other than gas
-            // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", investInput)
-            // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", investInput)
+            // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", 1000000)
+            // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", 1000000)
             await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
-            const delegate = await governanceToken.delegates(this.state.accounts[0])
-            if (delegate === 0) {            
-                await governanceToken.delegate(this.state.accounts[0])
+            const delegate = await governanceToken.delegates(accounts[0])
+            if (Number(delegate) === 0) {   
+                await governanceToken.delegate(accounts[0])
             }
         } catch (e) {
             console.log(e)
+        }
+    }
+
+    proposalButton = (proposal) => {
+        if (proposal.state === "Pending" || proposal.state === "Active") {
+            return (
+                <button  
+                    onClick={() => this.vote(proposal.id)}
+                    disabled={proposal.state !== "Active"}
+                > Vote </button>
+            )
+        } else if (proposal.state === "Succeeded") {
+            return (
+                <button  
+                    onClick={() => this.queue(proposal)}
+                > Queue </button>
+            )
+        } else if (proposal.state === "Queued") {
+            return (
+                <button  
+                    onClick={() => this.execute(proposal)}
+                    disabled={proposal.eta.toNumber() > Date.now()}
+                > {proposal.eta.toNumber() > Date.now() ? "In Queue until " + new Date(proposal.eta.toNumber()) : "Execute"} </button>
+            )
         }
     }
 
@@ -335,10 +363,8 @@ class App extends Component {
                                 <p>{"for: " + proposal.forVotes}</p>
                                 <p>{"against: " + proposal.againstVotes}</p>
                                 <p>{"state: " + proposal.state}</p>
-                                <button  
-                                    onClick={() => this.vote(proposal.id)}
-                                    disabled={proposal.state !== "Active"}
-                                > Vote </button>
+                                <p>{proposal.deadline > 0 ? "Voting ends in " + proposal.deadline + " blocks": "Voting ended"}</p>
+                                {this.proposalButton(proposal)}
                             </div>
                         ))
                     }</div>

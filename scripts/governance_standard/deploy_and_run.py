@@ -16,16 +16,16 @@ from web3 import Web3, constants
 QUORUM_PERCENTAGE = 4
 # VOTING_PERIOD = 45818  # 1 week - more traditional.
 # You might have different periods for different kinds of proposals
-VOTING_PERIOD = 30  # 5 blocks
+VOTING_PERIOD = 5  # 5 blocks
 VOTING_DELAY = 1  # 1 block
 
 # Timelock
 # MIN_DELAY = 3600  # 1 hour - more traditional
-MIN_DELAY = 1  # 1 seconds
+MIN_DELAY = 60  # 60 seconds
 
 # Proposal
-PROPOSAL_DESCRIPTION = "Store ['hello world!']] in the Box!"
-NEW_STORE_VALUE = ["hello world!"]
+PROPOSAL_DESCRIPTION = "Store ['hello interns!']] in the Box!"
+NEW_STORE_VALUE = ["hello interns!"]
 
 
 def deploy_governor():
@@ -136,7 +136,7 @@ def vote(proposal_id: int, vote: int):
     )
     tx.wait(2)
     print(tx.events["VoteCast"])
-    tx.wait(30)
+    tx.wait(5)
 
 
 def queue_and_execute(store_value):
@@ -159,7 +159,7 @@ def queue_and_execute(store_value):
         description_hash,
         {"from": account},
     )
-    tx.wait(2)
+    tx.wait(5)
     tx = GovernorContract[-1].execute(
         [Box[-1].address],
         [0],
