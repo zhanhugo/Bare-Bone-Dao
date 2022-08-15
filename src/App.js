@@ -3,7 +3,7 @@ import './App.css'
 import {getProvider} from "./getProvider"
 import {getEthereum} from "./getEthereum"
 import {getProposalState} from "./getProposalState"
-import map from "./artifacts/deployments/map.json"
+import map from "./deployments/map.json"
 import { ethers } from 'ethers'
 
 class App extends Component {
@@ -15,6 +15,7 @@ class App extends Component {
         box: null,
         boxValue: [],
         boxInput: "",
+        dex: null,
         investInput: 0,
         descriptionInput: "",
         governor: null,
@@ -76,20 +77,7 @@ class App extends Component {
 
     loadInitialContracts = async () => {
         const { chainId } = this.state
-        // <=42 to exclude Kovan, <42 to include kovan, 4 for rinkeby
-        if (chainId < 4) {
-            // Wrong Network!
-            return
-        }
-        
-        var _chainID = 0;
-        if (chainId === 4){
-            _chainID = 4;
-        }
-        if (chainId === 1337){
-            _chainID = "dev"
-        }
-        const box = await this.loadContract(_chainID,"Box")
+        const box = await this.loadContract(chainId, "Box")
 
         if (!box) {
             return
@@ -97,13 +85,19 @@ class App extends Component {
 
         const boxValue = await box.retrieve()
 
-        const governor = await this.loadContract(_chainID,"GovernorContract")
+        const dex = await this.loadContract(chainId, "Dex")
+
+        if (!dex) {
+            return
+        }
+
+        const governor = await this.loadContract(chainId, "GovernorContract")
 
         if (!governor) {
             return
         }
 
-        const governanceToken = await this.loadContract(_chainID,"GovernanceToken")
+        const governanceToken = await this.loadContract(chainId, "GovernanceToken")
 
         if (!governanceToken) {
             return
@@ -111,6 +105,7 @@ class App extends Component {
 
         this.setState({
             box,
+            dex,
             governor,
             governanceToken,
             boxValue
@@ -169,9 +164,9 @@ class App extends Component {
         // Load the artifact with the specified address
         let contractArtifact
         try {
-            contractArtifact = await import(`./artifacts/deployments/${chain}/${address}.json`)
+            contractArtifact = await import(`./deployments/${chain}/${address}.json`)
         } catch (e) {
-            console.log(`Failed to load contract artifact "./artifacts/deployments/${chain}/${address}.json"`)
+            console.log(`Failed to load contract deployment info "./deployments/${chain}/${address}.json"`)
             return undefined
         }
 
@@ -235,17 +230,13 @@ class App extends Component {
     }
 
     invest = async (e) => {
-        const { governanceToken, accounts, investInput } = this.state
+        const { dex, governanceToken, accounts, investInput } = this.state
         e.preventDefault()
         try {
-            // TODO: mint max_supply of GT to a contract that has exchange method
-            // Right now need manual approval of token transfer and no eth is needed other than gas
-            // await governanceToken.approve("0xc7966F141398364700177fe6871fe1E3E60Ebc4F", 1000000)
-            // await governanceToken.approve("0x8A4298bc642E0014A1C36a83efaf3F6D972C7bD9", 1000000)
-            await governanceToken.transferFrom("0x9C8b054ba9E08c7C1dC15e33E24Ca0dB23fcdeD4", accounts[0], investInput)
+            await dex.buy({value: investInput})
             const delegate = await governanceToken.delegates(accounts[0])
             if (Number(delegate) === 0) {   
-                await governanceToken.delegate(accounts[0])
+                await governanceToken.delegate(accounts[0], { gasLimit: 1000000 })
             }
         } catch (e) {
             console.log(e)
